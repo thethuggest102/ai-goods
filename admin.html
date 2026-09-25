@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пополнение ai-goods</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#6b7280; --line:#e3e6eb; --accent:#2563eb; --ok:#15803d; --err:#b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12151b; --card:#1b1f27; --text:#e7e9ee; --muted:#9aa3b2; --line:#2b313c; --accent:#60a5fa; --ok:#4ade80; --err:#f87171; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 -apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
+  main { max-width:520px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .balance { color:var(--muted); margin-bottom:20px; }
+  .balance b { color:var(--text); }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+  h2 { font-size:14px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 12px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--text); font-size:16px; }
+  input:focus { outline:2px solid var(--accent); border-color:transparent; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  details summary { cursor:pointer; color:var(--muted); font-size:14px; }
+  button { width:100%; padding:13px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:16px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  #state { display:none; }
+  #stateText { font-size:16px; }
+  #stateText.ok { color:var(--ok); } #stateText.err { color:var(--err); }
+  #otpBox { display:none; margin-top:12px; }
+  .note { font-size:13px; color:var(--muted); margin-top:10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Пополнение ai-goods</h1>
+  <div class="balance">Баланс: <b id="balance">…</b></div>
+
+  <section id="linkBanner" style="display:none; border-color:var(--accent)">
+    <h2>Пришла ссылка на оплату</h2>
+    <div id="linkText">Система прислала ссылку. Введите карту и подтвердите оплату.</div>
+  </section>
+
+  <form id="f" autocomplete="off">
+    <section id="amountBox">
+      <h2>Сумма</h2>
+      <label for="amount">Евро (минимум 5)</label>
+      <input id="amount" name="amount" type="number" min="5" step="1" value="5" required>
+    </section>
+
+    <section>
+      <h2>Карта Kaspi</h2>
+      <label for="card_number">Номер карты</label>
+      <input id="card_number" name="card_number" inputmode="numeric" autocomplete="off" required>
+      <div class="row">
+        <div><label for="card_expiry">Срок (ММ/ГГ)</label>
+          <input id="card_expiry" name="card_expiry" placeholder="08/29" autocomplete="off" required></div>
+        <div><label for="card_cvc">CVC</label>
+          <input id="card_cvc" name="card_cvc" type="password" inputmode="numeric" maxlength="4" autocomplete="off" required></div>
+      </div>
+      <label for="card_holder">Имя на карте (латиницей)</label>
+      <input id="card_holder" name="card_holder" autocomplete="off" required>
+      <div class="note">Карта не сохраняется: используется для одного платежа и сразу стирается.</div>
+    </section>
+
+    <section>
+      <details id="billingBox">
+        <summary>Платёжные данные (Казахстан)</summary>
+        <div class="row">
+          <div><label for="name">Имя</label><input id="name" name="name" required></div>
+          <div><label for="surname">Фамилия</label><input id="surname" name="surname" required></div>
+        </div>
+        <label for="phone">Телефон</label><input id="phone" name="phone" required>
+        <div class="row">
+          <div><label for="city">Город</label><input id="city" name="city" required></div>
+          <div><label for="post_code">Индекс</label><input id="post_code" name="post_code" required></div>
+        </div>
+        <label for="address">Адрес</label><input id="address" name="address" required>
+      </details>
+    </section>
+
+    <button id="go" type="submit">Пополнить</button>
+  </form>
+
+  <section id="state">
+    <h2>Статус</h2>
+    <div id="stateText"></div>
+    <div id="otpBox">
+      <label for="otp">Код из SMS</label>
+      <input id="otp" inputmode="numeric" autocomplete="one-time-code">
+      <button id="otpGo" type="button" style="margin-top:10px">Отправить код</button>
+    </div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const f = $("f");
+
+async function loadInfo() {
+  try {
+    const r = await fetch("/api/info"); const d = await r.json();
+    $("balance").textContent = "€" + d.balance.toFixed(2);
+    for (const [k, v] of Object.entries(d.billing)) if ($(k) && v) $(k).value = v;
+    if (Object.values(d.billing).some(v => !v)) $("billingBox").open = true;
+  } catch { $("balance").textContent = "не удалось загрузить"; }
+}
+
+f.addEventListener("submit", async e => {
+  e.preventDefault();
+  if (!f.reportValidity()) { $("billingBox").open = true; return; }
+  const body = Object.fromEntries(new FormData(f));
+  $("go").disabled = true;
+  const r = await fetch("/api/topup", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(body) });
+  for (const id of ["card_number","card_expiry","card_cvc","card_holder"]) $(id).value = "";
+  if (!r.ok) { alert((await r.json()).error || "Ошибка"); $("go").disabled = false; return; }
+  $("state").style.display = "block";
+  poll();
+});
+
+async function poll() {
+  const d = await (await fetch("/api/status")).json();
+  const t = $("stateText");
+  t.textContent = d.status || "";
+  t.className = d.done ? (d.ok ? "ok" : "err") : "";
+  $("otpBox").style.display = d.needs_otp ? "block" : "none";
+  if (d.done) { $("go").disabled = false; loadInfo(); return; }
+  setTimeout(poll, 1500);
+}
+
+$("otpGo").addEventListener("click", async () => {
+  const code = $("otp").value.trim(); if (!code) return;
+  await fetch("/api/otp", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ code }) });
+  $("otp").value = ""; $("otpBox").style.display = "none";
+});
+
+async function loadPending() {
+  try {
+    const d = await (await fetch("/api/pending")).json();
+    const banner = $("linkBanner");
+    if (d.pending) {
+      banner.style.display = "block";
+      $("linkText").textContent = d.amount
+        ? `Система прислала ссылку на €${Number(d.amount).toFixed(2)}. Введите карту и подтвердите оплату.`
+        : "Система прислала ссылку. Введите карту и подтвердите оплату.";
+      if (d.amount) { $("amount").value = d.amount; $("amountBox").style.display = "none"; }
+    } else {
+      banner.style.display = "none";
+      $("amountBox").style.display = "";
+    }
+  } catch {}
+}
+
+loadInfo();
+loadPending();
+setInterval(loadPending, 4000);
+</script>
+</body>
+</html>
